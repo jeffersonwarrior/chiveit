@@ -2,7 +2,7 @@ import express from 'express';
 import type { NextFunction } from 'express';
 import multer from 'multer';
 import type { InitResponse, IncrementResponse, DecrementResponse, AnalyzeResponse } from '../shared/types/api';
-import { redis, reddit, createServer, context, getServerPort } from '@devvit/web/server';
+import { redis, reddit, createServer, context, getServerPort, settings } from '@devvit/web/server';
 import { createPost } from './core/post';
 import { analyzeChiveImageWithGrok, getXaiApiKey } from './services/grokClient';
 import { scoreChiveAnalysis } from './domain/scoring';
@@ -106,6 +106,17 @@ router.post(
     try {
       const key = await getXaiApiKey();
       (req as any).xaiApiKey = key;
+
+      // Also resolve proxy URL while context is available
+      let proxyUrl = process.env.XAI_PROXY_URL;
+      if (!proxyUrl || proxyUrl.length === 0) {
+        const fromSettings = (await settings.get('XAI_PROXY_URL')) as string | undefined;
+        if (fromSettings && fromSettings.length > 0) {
+          proxyUrl = fromSettings;
+        }
+      }
+      (req as any).xaiProxyUrl = proxyUrl;
+
       next();
     } catch (err) {
       const error = err as Error;
@@ -120,6 +131,7 @@ router.post(
     try {
       const files = (req as any).files || [];
       const xaiApiKey = (req as any).xaiApiKey as string | undefined;
+      const xaiProxyUrl = (req as any).xaiProxyUrl as string | undefined;
       const results: AnalyzeResponse['results'] = [];
 
       if (!xaiApiKey) {
@@ -128,7 +140,7 @@ router.post(
 
       for (const [index, file] of files.entries()) {
         try {
-          const baseMetrics = await analyzeChiveImageWithGrok(file.buffer, file.mimetype, xaiApiKey);
+          const baseMetrics = await analyzeChiveImageWithGrok(file.buffer, file.mimetype, xaiApiKey, xaiProxyUrl);
           const scored = scoreChiveAnalysis(baseMetrics);
 
         results.push({

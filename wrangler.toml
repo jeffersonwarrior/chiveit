@@ -1,0 +1,7 @@
+name = "chiveit-proxy"
+main = "cloudflare-worker.js"
+compatibility_date = "2024-01-01"
+account_id = ""
+
+[vars]
+# Set XAI_API_KEY as secret via: wrangler secret put XAI_API_KEY

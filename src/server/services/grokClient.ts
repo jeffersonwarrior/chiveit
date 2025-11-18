@@ -19,19 +19,11 @@ export async function getXaiApiKey(): Promise<string> {
 export async function analyzeChiveImageWithGrok(
   buffer: Buffer,
   mimeType: string,
-  XAI_API_KEY: string
+  XAI_API_KEY: string,
+  PROXY_URL?: string
 ): Promise<BaseChiveMetrics> {
   const base64 = buffer.toString('base64');
   const dataUrl = `data:${mimeType};base64,${base64}`;
-
-  // Use proxy URL if configured (for Devvit allowlist workaround)
-  let PROXY_URL = process.env.XAI_PROXY_URL;
-  if (!PROXY_URL || PROXY_URL.length === 0) {
-    const fromSettings = (await settings.get('XAI_PROXY_URL')) as string | undefined;
-    if (fromSettings && fromSettings.length > 0) {
-      PROXY_URL = fromSettings;
-    }
-  }
 
   const apiUrl = PROXY_URL || 'https://api.x.ai/v1/chat/completions';
 
