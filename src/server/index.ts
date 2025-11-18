@@ -1,6 +1,7 @@
 import express from 'express';
 import type { NextFunction } from 'express';
 import multer from 'multer';
+import crypto from 'crypto';
 import type { InitResponse, IncrementResponse, DecrementResponse, AnalyzeResponse } from '../shared/types/api';
 import { redis, reddit, createServer, context, getServerPort, settings } from '@devvit/web/server';
 import { createPost } from './core/post';
@@ -99,6 +100,94 @@ router.post<{ postId: string }, DecrementResponse | { status: string; message: s
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
+// New async queue endpoint
+router.post(
+  '/api/analyze-async',
+  upload.array('images'),
+  async (req, res): Promise<void> => {
+    try {
+      const files = (req as any).files || [];
+      const jobs: string[] = [];
+
+      for (const [index, file] of files.entries()) {
+        const jobId = crypto.randomUUID();
+
+        // Upload image to Reddit media (so worker can fetch it)
+        const mediaUrl = await reddit.uploadMedia({
+          data: file.buffer,
+          type: file.mimetype as 'image/png' | 'image/jpeg',
+        }, context);
+
+        // Queue job in Redis
+        const job = {
+          jobId,
+          imageUrl: mediaUrl,
+          mimeType: file.mimetype,
+          submittedBy: context.userId || 'anonymous',
+          subreddit: context.subredditName || 'unknown',
+          postId: context.postId || '',
+          createdAt: Date.now(),
+          status: 'pending',
+        };
+
+        await redis.set(`analysis:jobs:${jobId}`, JSON.stringify(job), { expiration: new Date(Date.now() + 3600000) });
+        await redis.rPush('analysis:queue', JSON.stringify(job));
+
+        jobs.push(jobId);
+      }
+
+      res.json({ jobs });
+    } catch (err) {
+      const error = err as Error;
+      console.error('Error queuing analysis:', error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+);
+
+// Get job result
+router.get('/api/result/:jobId', async (req, res): Promise<void> => {
+  try {
+    const { jobId } = req.params;
+    const resultData = await redis.get(`analysis:results:${jobId}`);
+
+    if (!resultData) {
+      // Check if job exists
+      const jobData = await redis.get(`analysis:jobs:${jobId}`);
+      if (!jobData) {
+        res.status(404).json({ error: 'Job not found' });
+        return;
+      }
+
+      const job = JSON.parse(jobData);
+      res.json({ status: job.status });
+      return;
+    }
+
+    const result = JSON.parse(resultData);
+
+    if (result.status === 'failed') {
+      res.json({ status: 'failed', error: result.error });
+      return;
+    }
+
+    const scored = scoreChiveAnalysis(result.result);
+
+    res.json({
+      status: 'completed',
+      result: {
+        ...result.result,
+        ...scored,
+      },
+    });
+  } catch (err) {
+    const error = err as Error;
+    console.error('Error fetching result:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Legacy sync endpoint (keep for backward compat, but will be slow/timeout)
 router.post(
   '/api/analyze',
   // First middleware: resolve XAI API key while Devvit request context is intact

@@ -1,0 +1,13 @@
+{
+  "name": "chiveit-worker",
+  "version": "1.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "node worker.js",
+    "dev": "node --watch worker.js"
+  },
+  "dependencies": {
+    "redis": "^4.6.12",
+    "dotenv": "^16.3.1"
+  }
+}
