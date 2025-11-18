@@ -25,6 +25,11 @@
       "XAIAPIKEY": {
         "label": "XAI Grok API key",
         "type": "string"
+      },
+      "XAI_PROXY_URL": {
+        "label": "XAI Proxy Server URL (optional)",
+        "type": "string",
+        "defaultValue": ""
       }
     }
   },

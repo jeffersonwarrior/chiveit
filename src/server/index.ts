@@ -1,7 +1,7 @@
 import express from 'express';
 import type { NextFunction } from 'express';
 import multer from 'multer';
-import { InitResponse, IncrementResponse, DecrementResponse, AnalyzeResponse } from '../shared/types/api';
+import type { InitResponse, IncrementResponse, DecrementResponse, AnalyzeResponse } from '../shared/types/api';
 import { redis, reddit, createServer, context, getServerPort } from '@devvit/web/server';
 import { createPost } from './core/post';
 import { analyzeChiveImageWithGrok, getXaiApiKey } from './services/grokClient';
