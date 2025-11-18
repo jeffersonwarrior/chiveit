@@ -1,4 +1,3 @@
-import axios from 'axios';
 import { settings } from '@devvit/web/server';
 import type { BaseChiveMetrics, RegionMetrics } from '../domain/scoring';
 
@@ -25,13 +24,22 @@ export async function analyzeChiveImageWithGrok(
   const base64 = buffer.toString('base64');
   const dataUrl = `data:${mimeType};base64,${base64}`;
 
-  const response = await axios.post(
-    'https://api.x.ai/v1/chat/completions',
-    {
-      model: 'grok-4-fast',
-      temperature: 0.2,
-      response_format: { type: 'json_object' },
-      messages: [
+  // Use proxy URL if configured (for Devvit allowlist workaround)
+  let PROXY_URL = process.env.XAI_PROXY_URL;
+  if (!PROXY_URL || PROXY_URL.length === 0) {
+    const fromSettings = (await settings.get('XAI_PROXY_URL')) as string | undefined;
+    if (fromSettings && fromSettings.length > 0) {
+      PROXY_URL = fromSettings;
+    }
+  }
+
+  const apiUrl = PROXY_URL || 'https://api.x.ai/v1/chat/completions';
+
+  const requestBody = {
+    model: 'grok-4-fast',
+    temperature: 0.2,
+    response_format: { type: 'json_object' },
+    messages: [
         {
           role: 'system',
           content:
@@ -70,17 +78,32 @@ export async function analyzeChiveImageWithGrok(
           ],
         },
       ],
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${XAI_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      timeout: 60_000,
-    }
-  );
+  };
 
-  const content = (response as any)?.data?.choices?.[0]?.message?.content;
+  // Different headers for proxy vs direct API call
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+
+  // Only add Authorization header for direct X.AI API calls
+  // Proxy server handles auth with its own env variable
+  if (!PROXY_URL) {
+    headers['Authorization'] = `Bearer ${XAI_API_KEY}`;
+  }
+
+  const response = await fetch(apiUrl, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(requestBody),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`X.AI API request failed: ${response.status} ${response.statusText} - ${errorText}`);
+  }
+
+  const data = await response.json();
+  const content = data?.choices?.[0]?.message?.content;
   if (!content) {
     throw new Error('No content returned from Grok');
   }

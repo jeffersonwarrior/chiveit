@@ -1,0 +1,14 @@
+{
+  "name": "xai-proxy-server",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Proxy server for X.AI API calls from Reddit Devvit",
+  "main": "proxy-server.js",
+  "scripts": {
+    "start": "node proxy-server.js"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "cors": "^2.8.5"
+  }
+}
