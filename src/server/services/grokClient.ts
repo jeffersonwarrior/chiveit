@@ -83,62 +83,72 @@ export async function analyzeChiveImageWithGrok(
     headers['Authorization'] = `Bearer ${XAI_API_KEY}`;
   }
 
-  const response = await fetch(apiUrl, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(requestBody),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 60000); // 60s timeout
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`X.AI API request failed: ${response.status} ${response.statusText} - ${errorText}`);
+  try {
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(requestBody),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`X.AI API request failed: ${response.status} ${response.statusText} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    const content = data?.choices?.[0]?.message?.content;
+    if (!content) {
+      throw new Error('No content returned from Grok');
+    }
+
+    let jsonText: string;
+    if (typeof content === 'string') {
+      jsonText = content;
+    } else if (Array.isArray(content)) {
+      jsonText = content
+        .map((part) => {
+          if (typeof part === 'string') return part;
+          if (typeof part === 'object' && part !== null) {
+            return (part as any).text || (part as any).content || '';
+          }
+          return '';
+        })
+        .join('\n');
+    } else if (typeof content === 'object' && content !== null) {
+      jsonText = (content as any).text || (content as any).content || JSON.stringify(content);
+    } else {
+      throw new Error('Unsupported Grok content format');
+    }
+
+    const match = jsonText.match(/\{[\s\S]*\}/);
+    if (!match) {
+      throw new Error('No JSON object found in Grok response');
+    }
+
+    const parsed = JSON.parse(match[0]) as {
+      averageThicknessMm?: number;
+      thicknessStdDevMm?: number;
+      cutQualityLabel?: string;
+      rawNotes?: string;
+      regions?: RegionMetrics[];
+    };
+
+    const base: BaseChiveMetrics = {
+      averageThicknessMm: parsed.averageThicknessMm ?? null,
+      thicknessStdDevMm: parsed.thicknessStdDevMm ?? null,
+      cutQualityLabel: (parsed.cutQualityLabel as BaseChiveMetrics['cutQualityLabel']) ?? 'unknown',
+      rawNotes: parsed.rawNotes || '',
+      regions: Array.isArray(parsed.regions) ? parsed.regions : [],
+    };
+
+    return base;
+  } catch (error) {
+    clearTimeout(timeout);
+    throw error;
   }
-
-  const data = await response.json();
-  const content = data?.choices?.[0]?.message?.content;
-  if (!content) {
-    throw new Error('No content returned from Grok');
-  }
-
-  let jsonText: string;
-  if (typeof content === 'string') {
-    jsonText = content;
-  } else if (Array.isArray(content)) {
-    jsonText = content
-      .map((part) => {
-        if (typeof part === 'string') return part;
-        if (typeof part === 'object' && part !== null) {
-          return (part as any).text || (part as any).content || '';
-        }
-        return '';
-      })
-      .join('\n');
-  } else if (typeof content === 'object' && content !== null) {
-    jsonText = (content as any).text || (content as any).content || JSON.stringify(content);
-  } else {
-    throw new Error('Unsupported Grok content format');
-  }
-
-  const match = jsonText.match(/\{[\s\S]*\}/);
-  if (!match) {
-    throw new Error('No JSON object found in Grok response');
-  }
-
-  const parsed = JSON.parse(match[0]) as {
-    averageThicknessMm?: number;
-    thicknessStdDevMm?: number;
-    cutQualityLabel?: string;
-    rawNotes?: string;
-    regions?: RegionMetrics[];
-  };
-
-  const base: BaseChiveMetrics = {
-    averageThicknessMm: parsed.averageThicknessMm ?? null,
-    thicknessStdDevMm: parsed.thicknessStdDevMm ?? null,
-    cutQualityLabel: (parsed.cutQualityLabel as BaseChiveMetrics['cutQualityLabel']) ?? 'unknown',
-    rawNotes: parsed.rawNotes || '',
-    regions: Array.isArray(parsed.regions) ? parsed.regions : [],
-  };
-
-  return base;
 }

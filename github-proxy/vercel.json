@@ -11,8 +11,5 @@
       "src": "/(.*)",
       "dest": "server.js"
     }
-  ],
-  "env": {
-    "XAI_API_KEY": "@xai_api_key"
-  }
+  ]
 }
