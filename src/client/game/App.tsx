@@ -36,6 +36,76 @@ export const App = () => {
     setPreviews(nextPreviews);
   };
 
+  const pollResults = async (jobIds: string[]): Promise<AnalyzeResultItem[]> => {
+    const results: AnalyzeResultItem[] = [];
+    const maxAttempts = 60; // 60 attempts * 2s = 2 minutes max
+
+    for (const jobId of jobIds) {
+      let attempts = 0;
+
+      while (attempts < maxAttempts) {
+        const response = await fetch(`/api/result/${jobId}`);
+        const data = await response.json();
+
+        if (data.status === 'completed') {
+          const result = data.result;
+          results.push({
+            filename: `Job ${jobId.slice(0, 8)}`,
+            bunchIndex: results.length,
+            averageThicknessMm: result.averageThicknessMm,
+            thicknessStdDevMm: result.thicknessStdDevMm,
+            cutQualityLabel: result.cutQualityLabel,
+            rawNotes: result.rawNotes,
+            regions: result.regions,
+            thicknessConsistencyScore: result.thicknessConsistencyScore,
+            cutQualityScore: result.cutQualityScore,
+            overallScore: result.overallScore,
+            notes: result.notes,
+          });
+          break;
+        } else if (data.status === 'failed') {
+          results.push({
+            filename: `Job ${jobId.slice(0, 8)}`,
+            bunchIndex: results.length,
+            averageThicknessMm: null,
+            thicknessStdDevMm: null,
+            cutQualityLabel: 'unknown',
+            overallScore: null,
+            thicknessConsistencyScore: null,
+            cutQualityScore: null,
+            notes: `Analysis failed: ${data.error}`,
+            rawNotes: '',
+            regions: [],
+          });
+          break;
+        }
+
+        // Still processing, wait and retry
+        setStatus(`Processing job ${results.length + 1}/${jobIds.length}...`);
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        attempts++;
+      }
+
+      if (attempts >= maxAttempts) {
+        results.push({
+          filename: `Job ${jobId.slice(0, 8)}`,
+          bunchIndex: results.length,
+          averageThicknessMm: null,
+          thicknessStdDevMm: null,
+          cutQualityLabel: 'unknown',
+          overallScore: null,
+          thicknessConsistencyScore: null,
+          cutQualityScore: null,
+          notes: 'Analysis timed out',
+          rawNotes: '',
+          regions: [],
+        });
+      }
+    }
+
+    return results;
+  };
+
   const handleAnalyze = async () => {
     if (!files || files.length === 0) return;
 
@@ -46,12 +116,13 @@ export const App = () => {
     }
 
     setLoading(true);
-    setStatus('Analyzing chives...');
+    setStatus('Uploading images...');
     setError(null);
     setResults(null);
 
     try {
-      const response = await fetch('/api/analyze', {
+      // Submit jobs to queue
+      const response = await fetch('/api/analyze-async', {
         method: 'POST',
         body: formData,
       });
@@ -60,10 +131,16 @@ export const App = () => {
         throw new Error(`Server error: ${response.status}`);
       }
 
-      const data: AnalyzeResponse = await response.json();
-      setStatus(`Analyzed ${data.analyzedCount} image(s).`);
-      setResults(data.results);
-      setRawJson(JSON.stringify(data, null, 2));
+      const data: { jobs: string[] } = await response.json();
+      setStatus('Images queued, waiting for processing...');
+      setRawJson(JSON.stringify({ queuedJobs: data.jobs }, null, 2));
+
+      // Poll for results
+      const results = await pollResults(data.jobs);
+
+      setStatus(`Analyzed ${results.length} image(s).`);
+      setResults(results);
+      setRawJson(JSON.stringify({ analyzedCount: results.length, results }, null, 2));
     } catch (err) {
       const e = err as Error;
       setError(e.message);
